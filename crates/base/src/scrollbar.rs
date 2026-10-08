@@ -995,6 +995,21 @@ impl Scrollbar {
         WIDTH
     }
 
+    fn track_width(&self, cx: &App) -> Pixels {
+        self.styles
+            .track
+            .width
+            .or(cx.theme().scrollbar.styles().track.width)
+            .unwrap_or(WIDTH)
+    }
+
+    /// The width the scrollbar takes from the edge it sits on: its track, or
+    /// its active thumb where that reaches further.
+    pub(crate) fn full_width(&self, cx: &App) -> Pixels {
+        let (_, _, _, width, inset, _, _) = self.style_for_active(cx);
+        self.track_width(cx).max(inset + width)
+    }
+
     fn resolve_track(
         &self,
         cx: &App,
@@ -1425,12 +1440,7 @@ impl Element for Scrollbar {
 
         for axis in self.axis.all().into_iter() {
             let is_vertical = axis.is_vertical();
-            let track_width = self
-                .styles
-                .track
-                .width
-                .or(cx.theme().scrollbar.styles().track.width)
-                .unwrap_or(WIDTH);
+            let track_width = self.track_width(cx);
             let (scroll_area_size, container_size, scroll_position) = if is_vertical {
                 (
                     scroll_size.height,
@@ -2508,6 +2518,23 @@ mod tests {
             assert_eq!(track, theme_track);
             assert_eq!(width, px(7.));
             assert_eq!(cx.theme().scrollbar.styles().track.width, Some(px(13.)));
+        });
+    }
+
+    #[gpui::test]
+    fn the_full_width_is_the_track_or_an_active_thumb_reaching_further(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let scrollbar = Scrollbar::vertical(&TestHandle::new(Size::default()));
+            assert_eq!(scrollbar.full_width(cx), Scrollbar::width());
+
+            crate::Theme::global_mut(cx).scrollbar = crate::ScrollbarTheme::new()
+                .with_styles(ScrollbarStyles::default().track(|style| style.width(px(24.))));
+            assert_eq!(scrollbar.full_width(cx), px(24.));
+
+            crate::Theme::global_mut(cx).scrollbar = crate::ScrollbarTheme::new().with_styles(
+                ScrollbarStyles::default().thumb_active(|style| style.width(px(20.)).inset(px(4.))),
+            );
+            assert_eq!(scrollbar.full_width(cx), px(24.));
         });
     }
 

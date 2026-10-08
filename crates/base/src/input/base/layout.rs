@@ -35,6 +35,9 @@ pub(super) struct LastLayout {
     pub(super) text_origin_x: Pixels,
     /// The x of the gutter, relative to the input bounds.
     pub(super) gutter_origin_x: Pixels,
+    /// The width of the text, without the gutter and the margin kept from a
+    /// scrollbar on the left.
+    pub(super) text_width: Pixels,
     /// Width of one space in the editor font.
     ///
     /// Past the end of a line there are no glyphs to hit-test against, so this is the

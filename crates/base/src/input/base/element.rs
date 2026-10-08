@@ -611,7 +611,6 @@ impl<M: InputModeKind> TextElement<M> {
         let line_height = last_layout.line_height;
         let visible_range = &last_layout.visible_range;
         let lines = &last_layout.lines;
-        let line_number_width = last_layout.line_number_width;
 
         let active_id = state.active_selection().id;
         let mut scroll_offset = state.scroll_handle.offset();
@@ -699,10 +698,10 @@ impl<M: InputModeKind> TextElement<M> {
                     };
 
                     scroll_offset.x = if scroll_offset.x + cursor_pos.x
-                        > (bounds.size.width - line_number_width - safety_margin)
+                        > (last_layout.text_width - safety_margin)
                     {
                         // cursor is out of right
-                        bounds.size.width - line_number_width - safety_margin - cursor_pos.x
+                        last_layout.text_width - safety_margin - cursor_pos.x
                     } else if scroll_offset.x + cursor_pos.x < px(0.) {
                         // cursor is out of left
                         -cursor_pos.x
@@ -2741,9 +2740,29 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let line_number_width =
             Self::layout_line_numbers(&state, &text, text_size, &text_style, window);
 
+        let gutter_side = state.gutter_side;
+        let (mut text_origin_x, gutter_origin_x) = if gutter_side.is_left() {
+            (line_number_width, px(0.))
+        } else {
+            (px(0.), bounds.size.width - line_number_width)
+        };
+        // The text keeps clear of a scrollbar on the left, and at least the margin it keeps
+        // from the right edge.
+        let mut reserved_width = line_number_width;
+        if state.scrollbar_placement.is_left() {
+            let clearance = (Scrollbar::vertical(&state.scroll_handle).full_width(cx)
+                - state.editor_paddings.left)
+                .max(RIGHT_MARGIN);
+            if text_origin_x < clearance {
+                reserved_width += clearance - text_origin_x;
+                text_origin_x = clearance;
+            }
+        }
+        let text_width = bounds.size.width - reserved_width;
+
         let mut bounds = bounds;
         let wrap_width = if multi_line && state.soft_wrap {
-            Some(bounds.size.width - line_number_width - RIGHT_MARGIN)
+            Some(text_width - RIGHT_MARGIN)
         } else {
             None
         };
@@ -2770,7 +2789,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
 
         let line_height = window.line_height();
         let token_elements = self.measure_tokens(
-            (bounds.size.width - line_number_width - RIGHT_MARGIN).max(px(1.)),
+            (text_width - RIGHT_MARGIN).max(px(1.)),
             line_height,
             bounds.size.height,
             window,
@@ -2816,12 +2835,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
             )
         };
 
-        let gutter_side = state.gutter_side;
-        let (text_origin_x, gutter_origin_x) = if gutter_side.is_left() {
-            (line_number_width, px(0.))
-        } else {
-            (px(0.), bounds.size.width - line_number_width)
-        };
         let mut last_layout = LastLayout {
             visible_range,
             visible_buffer_lines,
@@ -2837,6 +2850,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             gutter_side,
             text_origin_x,
             gutter_origin_x,
+            text_width,
             space_width,
             lines: Rc::new(vec![]),
             cursor_bounds: None,
@@ -2995,8 +3009,8 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // last content row, so take the max rather than summing — summing
         // left a band of empty space the cursor could never reach.
         let mut scroll_size = size(
-            if longest_line_width + line_number_width + RIGHT_MARGIN > bounds.size.width {
-                longest_line_width + line_number_width + RIGHT_MARGIN
+            if longest_line_width + reserved_width + RIGHT_MARGIN > bounds.size.width {
+                longest_line_width + reserved_width + RIGHT_MARGIN
             } else {
                 longest_line_width
             },
@@ -3008,7 +3022,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // TODO: should be add some gap to right, to convenient to focus on boundary position
         if last_layout.text_align == TextAlign::Right || last_layout.text_align == TextAlign::Center
         {
-            scroll_size.width = longest_line_width + line_number_width;
+            scroll_size.width = longest_line_width + reserved_width;
         }
 
         // `position_for_index` for example
@@ -3401,13 +3415,8 @@ impl<M: InputModeKind> Element for TextElement<M> {
                     let ghost_p = point(ghost_x, origin.y + offset_y);
 
                     // Paint semi-transparent background for ghost line
-                    let ghost_bounds = Bounds::new(
-                        ghost_p,
-                        size(
-                            bounds.size.width - prepaint.last_layout.line_number_width,
-                            line_height,
-                        ),
-                    );
+                    let ghost_bounds =
+                        Bounds::new(ghost_p, size(prepaint.last_layout.text_width, line_height));
                     window.paint_quad(fill(ghost_bounds, editor_background));
 
                     // Paint ghost line text
@@ -3817,9 +3826,10 @@ fn split_runs_by_bg_segments(
 mod tests {
     use super::*;
     use crate::input::{EditorMode, EditorState, FoldRange, RangeDecoration, Redo, Undo};
+    use crate::{ScrollbarMode, ScrollbarStyles, ScrollbarTheme, Theme};
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, Render, TestAppContext,
-        VisualTestContext, div,
+        VisualTestContext, div, prelude::FluentBuilder as _,
     };
 
     #[test]
@@ -4622,13 +4632,12 @@ mod tests {
                     let icon = *icons.borrow().first().expect("a fold icon is laid out");
                     spans.push(from_outer(icon.left(), icon.size.width));
                 }
-                let text_width = input_bounds.size.width - layout.line_number_width;
                 let text_gap = if side.is_left() {
                     layout.text_origin_x - (layout.gutter_origin_x + layout.line_number_width)
                 } else {
-                    layout.gutter_origin_x - (layout.text_origin_x + text_width)
+                    layout.gutter_origin_x - (layout.text_origin_x + layout.text_width)
                 };
-                (spans, text_gap, text_width)
+                (spans, text_gap, layout.text_width)
             };
 
             for folding in [true, false] {
@@ -4690,6 +4699,83 @@ mod tests {
                 );
             }
         });
+    }
+
+    #[gpui::test]
+    fn the_text_keeps_clear_of_a_scrollbar_on_the_left(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"word ".repeat(40), true);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_editor_paddings(Edges {
+                    top: px(4.),
+                    right: px(10.),
+                    bottom: px(4.),
+                    left: px(6.),
+                });
+                state.set_gutter_side(Side::Right, cx);
+                state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let input_bounds = state.input_bounds;
+            let scrollbar = state.editor_scrollbar_snapshot.get().unwrap().layout.bounds;
+
+            assert!(
+                input_bounds.left() + layout.text_origin_x >= scrollbar.left() + Scrollbar::width(),
+                "the text starts under the scrollbar"
+            );
+            // The text gives the room up, the gutter does not move.
+            assert_eq!(
+                layout.gutter_origin_x,
+                input_bounds.size.width - layout.line_number_width
+            );
+            assert_eq!(
+                layout.text_origin_x + layout.text_width,
+                layout.gutter_origin_x
+            );
+            assert_eq!(layout.wrap_width, Some(layout.text_width - RIGHT_MARGIN));
+        });
+    }
+
+    #[gpui::test]
+    fn the_text_keeps_clear_of_the_whole_track_of_a_scrollbar_on_the_left(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"word\n".repeat(40), true);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        for track_width in [None, Some(px(24.))] {
+            let in_text = cx.update(|window, cx| {
+                Theme::global_mut(cx).scrollbar = ScrollbarTheme::new()
+                    .with_mode(ScrollbarMode::Always)
+                    .with_styles(
+                        ScrollbarStyles::default().when_some(track_width, |styles, width| {
+                            styles.track(|track| track.width(width))
+                        }),
+                    );
+                editor.update(cx, |state, cx| {
+                    state.set_gutter_side(Side::Right, cx);
+                    state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+                    state.set_selected_range(4..4, cx);
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let input_bounds = state.input_bounds;
+                let scrollbar = state.editor_scrollbar_snapshot.get().unwrap().layout.bounds;
+
+                assert_eq!(scrollbar.left(), input_bounds.left());
+                assert!(
+                    layout.text_origin_x >= track_width.unwrap_or(Scrollbar::width()),
+                    "{track_width:?} track: the text starts under the scrollbar"
+                );
+                input_bounds.origin + point(layout.text_origin_x + px(1.), layout.line_height * 0.5)
+            });
+
+            cx.simulate_click(in_text, gpui::Modifiers::default());
+            editor.read_with(&cx, |state, _| {
+                assert_eq!(state.selected_range(), 0..0, "{track_width:?} track");
+            });
+        }
     }
 
     #[gpui::test]
