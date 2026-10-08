@@ -140,6 +140,14 @@ EditorState::new(window, cx)
     .gutter_side(Side::Right)
 ```
 
+On either side, the fold icons sit next to the text, then the line numbers,
+then the gutter markers. Use `gutter_order` to list the columns from the text
+outward; a column left out follows the listed ones:
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Markers])
+```
+
 ## Keyboard shortcuts and column selection
 
 These defaults apply while the editor is focused. On macOS, Option is the Alt
@@ -378,16 +386,17 @@ over earlier ones.
 
 A background spans the whole row, gutter included, across all of its soft-wrapped
 lines, under the active line, indent guides, selection and text. A marker is painted
-in a slot of its own on the outer side of the line numbers, so it is shown only
-while line numbers are. The gutter reserves the slot while any collection has a
-provider, and keeps it as marked rows scroll in and out of view. The styled editor
-sizes the marker at 90% of its effective font size and the gap at 30%. The icon,
-reserved slot and vertical centering share the same size, so markers follow both
-interface zoom and an editor-specific `.text_size(...)` change. `DiffAdded`,
-`DiffRemoved`, `DiffChanged`, `Conflict`, `Bookmark` and `Breakpoint` take the
-theme's success, danger, warning and info colors; `GutterMarker::Custom { icon, color }`
-paints an icon asset path as given. Neither affects hit testing or focus, and neither
-has a pointer or keyboard action.
+in a slot of its own, shown only while line numbers are. In the default order the
+slot is on the outer side of the line numbers; `gutter_order` can move it nearer the
+text, as IntelliJ IDEA places its markers. The gutter reserves the slot while any
+collection has a provider, and keeps it as marked rows scroll in and out of view.
+The styled editor sizes the marker at 90% of its effective font size and the gap at
+30%. The icon, reserved slot and vertical centering share the same size, so markers
+follow both interface zoom and an editor-specific `.text_size(...)` change.
+`DiffAdded`, `DiffRemoved`, `DiffChanged`, `Conflict`, `Bookmark` and `Breakpoint`
+take the theme's success, danger, warning and info colors;
+`GutterMarker::Custom { icon, color }` paints an icon asset path as given. Neither
+affects hit testing or focus, and neither has a pointer or keyboard action.
 
 `EditorState::row_bounds(row)` returns the band a row occupies in window coordinates,
 where it is painted: below a multi-line inline completion, rows move down with the

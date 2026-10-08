@@ -118,6 +118,12 @@ EditorState::new(window, cx)
     .gutter_side(Side::Right)
 ```
 
+无论 gutter 位于哪一侧，折叠图标默认紧邻文本，向外依次是行号和 gutter 标记。使用 `gutter_order` 可按从文本向外的顺序列出各列，未列出的列依次排在其后：
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Markers])
+```
+
 ## 快捷键与矩形列选
 
 以下默认快捷键在编辑器聚焦时生效。macOS 的 Option 对应 Alt 修饰键；Linux 的这些操作不使用 Super/Win。
@@ -322,7 +328,8 @@ added.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
 后创建的集合绘制在先创建的集合之上。
 
 背景横跨整行（包括行号槽），覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
-选区和文字下方。标记绘制在行号与行号槽外缘之间的独立槽位中，因此只在显示行号时出现。只要有集合设置了
+选区和文字下方。标记绘制在独立槽位中，只在显示行号时出现。默认顺序下，该槽位位于行号与行号槽外缘之间；
+使用 `gutter_order` 可将其移到更靠近文本的位置，与 IntelliJ IDEA 放置标记的方式一致。只要有集合设置了
 provider，行号槽就会保留该槽位，标记行滚入或滚出视图时宽度不变。
 样式化编辑器的标记尺寸为实际字号的 90%，间距为字号的 30%。图标、预留槽位和垂直居中使用同一尺寸，
 因此标记既跟随界面缩放，也跟随编辑器单独设置的 `.text_size(...)` 变化。`DiffAdded`、`DiffRemoved`、

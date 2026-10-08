@@ -21,7 +21,7 @@ use crate::{
 };
 
 use super::{
-    InputBaseState, RangeDecorationStyle, TextDecoration,
+    GutterColumn, InputBaseState, RangeDecorationStyle, TextDecoration,
     layout::{LastLayout, WhitespaceIndicators},
     mode::LayoutMode,
 };
@@ -348,22 +348,31 @@ fn editor_gutter_bounds(
     }
 }
 
-/// Return the x of the line numbers and of the fold icons, relative to the input bounds.
+/// Return the x and the width of a gutter column, relative to the input bounds.
 ///
-/// From the text outward, a gutter holds a margin, the fold icons, the line
-/// numbers, then the gutter markers. A gutter on the right is the mirror of
-/// one on the left.
-fn gutter_columns(last_layout: &LastLayout, folding: bool) -> (Pixels, Pixels) {
-    let fold_width = fold_column_width(folding);
-    let fold_inset = LINE_NUMBER_RIGHT_MARGIN;
-    let numbers_inset = fold_inset + fold_width;
+/// From the text outward, a gutter holds a margin, then its columns in the
+/// order of `gutter_order`. A gutter on the right is the mirror of one on the
+/// left.
+fn gutter_column(
+    last_layout: &LastLayout,
+    folding: bool,
+    column: GutterColumn,
+) -> (Pixels, Pixels) {
+    let width = |column| match column {
+        GutterColumn::FoldIcons => fold_column_width(folding),
+        GutterColumn::LineNumbers => line_number_column_width(last_layout, folding),
+        GutterColumn::Markers => last_layout.gutter_marker_width,
+    };
+    let inset = last_layout
+        .gutter_order
+        .iter()
+        .take_while(|&&other| other != column)
+        .fold(LINE_NUMBER_RIGHT_MARGIN, |inset, &other| {
+            inset + width(other)
+        });
     (
-        gutter_column_x(
-            last_layout,
-            numbers_inset,
-            line_number_column_width(last_layout, folding),
-        ),
-        gutter_column_x(last_layout, fold_inset, fold_width),
+        gutter_column_x(last_layout, inset, width(column)),
+        width(column),
     )
 }
 
@@ -394,11 +403,34 @@ fn gutter_column_x(last_layout: &LastLayout, inset: Pixels, width: Pixels) -> Pi
 /// Return the x of a line number `width` wide, aligned toward the text,
 /// relative to the input bounds.
 fn line_number_x(last_layout: &LastLayout, folding: bool, width: Pixels) -> Pixels {
-    let (numbers_x, _) = gutter_columns(last_layout, folding);
+    let (numbers_x, numbers_width) = gutter_column(last_layout, folding, GutterColumn::LineNumbers);
     if last_layout.gutter_side.is_left() {
-        numbers_x + line_number_column_width(last_layout, folding) - width
+        numbers_x + numbers_width - width
     } else {
         numbers_x
+    }
+}
+
+/// Return the x of a gutter marker `size` wide, relative to the input bounds.
+///
+/// The rest of the markers' column is the gap toward the line numbers.
+fn gutter_marker_x(last_layout: &LastLayout, folding: bool, size: Pixels) -> Pixels {
+    let (slot_x, slot_width) = gutter_column(last_layout, folding, GutterColumn::Markers);
+    let position = |column| {
+        last_layout
+            .gutter_order
+            .iter()
+            .position(|&other| other == column)
+    };
+    let inset = if position(GutterColumn::LineNumbers) < position(GutterColumn::Markers) {
+        slot_width - size
+    } else {
+        px(0.)
+    };
+    if last_layout.gutter_side.is_left() {
+        slot_x + slot_width - inset - size
+    } else {
+        slot_x + inset
     }
 }
 
@@ -1203,8 +1235,7 @@ impl<M: InputModeKind> TextElement<M> {
         line_number_width
     }
 
-    /// Return the width reserved for gutter markers between the line numbers and
-    /// the outer edge of the gutter.
+    /// Return the width reserved for the gutter markers' column.
     ///
     /// The slot is reserved while line numbers are shown, a marker renderer is set
     /// and a line decoration collection has a provider, so the gutter keeps its
@@ -1441,7 +1472,7 @@ impl<M: InputModeKind> TextElement<M> {
 
         // Second pass: create and prepaint icons
         let line_height = last_layout.line_height;
-        let (_, fold_icon_x) = gutter_columns(last_layout, true);
+        let (fold_icon_x, _) = gutter_column(last_layout, true, GutterColumn::FoldIcons);
         let icon_relative_pos = point(
             (FOLD_ICON_HITBOX_WIDTH - FOLD_ICON_WIDTH).half(),
             (line_height - FOLD_ICON_WIDTH).half(),
@@ -1524,8 +1555,8 @@ impl<M: InputModeKind> TextElement<M> {
 
     /// Layout line decoration backgrounds and gutter markers for the visible rows.
     ///
-    /// Markers are only laid out while line numbers are shown, in the slot
-    /// between them and the outer edge of the gutter.
+    /// Markers are only laid out while line numbers are shown, in their column
+    /// of the gutter.
     fn layout_line_decorations(
         &self,
         origin_x: Pixels,
@@ -1540,7 +1571,7 @@ impl<M: InputModeKind> TextElement<M> {
         ) else {
             return LineDecorationLayout::default();
         };
-        let (decorations, renderer, marker_size) = {
+        let (decorations, renderer, marker_size, folding) = {
             let state = self.state.read(cx);
             let renderer = state
                 .mode
@@ -1554,6 +1585,7 @@ impl<M: InputModeKind> TextElement<M> {
                     .editor_style
                     .gutter_marker_size()
                     .to_pixels(window.rem_size()),
+                state.mode.is_folding(),
             )
         };
         if decorations.is_empty() {
@@ -1562,11 +1594,7 @@ impl<M: InputModeKind> TextElement<M> {
 
         let line_height = last_layout.line_height;
         let rows: Vec<_> = last_layout.row_extents().collect();
-        let marker_x = if last_layout.gutter_side.is_left() {
-            origin_x
-        } else {
-            origin_x + last_layout.gutter_origin_x + last_layout.line_number_width - marker_size
-        };
+        let marker_x = origin_x + gutter_marker_x(last_layout, folding, marker_size);
 
         let mut layout = LineDecorationLayout::default();
         for decoration in &decorations {
@@ -2848,6 +2876,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             gutter_marker_width: Self::gutter_marker_width(state, window),
             ghost_lines: None,
             gutter_side,
+            gutter_order: state.gutter_order,
             text_origin_x,
             gutter_origin_x,
             text_width,
@@ -4182,7 +4211,7 @@ mod tests {
             let input_bounds = state.input_bounds;
             let slot = layout.gutter_marker_width;
             assert!(slot > px(0.));
-            let (numbers_x, _) = gutter_columns(layout, true);
+            let (numbers_x, _) = gutter_column(layout, true, GutterColumn::LineNumbers);
             assert_eq!(
                 numbers_x,
                 layout.gutter_origin_x + LINE_NUMBER_RIGHT_MARGIN + FOLD_ICON_HITBOX_WIDTH
@@ -4205,7 +4234,10 @@ mod tests {
             editor.update(cx, |state, cx| state.set_gutter_side(Side::Left, cx));
             window.draw(cx).clear(cx);
             let layout = editor.read(cx).last_layout.clone().unwrap();
-            assert_eq!(gutter_columns(&layout, true).0, layout.gutter_marker_width);
+            assert_eq!(
+                gutter_column(&layout, true, GutterColumn::LineNumbers).0,
+                layout.gutter_marker_width
+            );
         });
     }
 
@@ -4545,6 +4577,50 @@ mod tests {
         });
     }
 
+    /// Every order the gutter's columns can take, from the text outward.
+    const GUTTER_ORDERS: [[GutterColumn; 3]; 6] = {
+        use GutterColumn::*;
+        [
+            [FoldIcons, LineNumbers, Markers],
+            [FoldIcons, Markers, LineNumbers],
+            [LineNumbers, FoldIcons, Markers],
+            [LineNumbers, Markers, FoldIcons],
+            [Markers, FoldIcons, LineNumbers],
+            [Markers, LineNumbers, FoldIcons],
+        ]
+    };
+
+    /// How far `column` is from the text in `order`, given each column's width.
+    fn inset_from_text(
+        order: &[GutterColumn],
+        column: GutterColumn,
+        width: impl Fn(GutterColumn) -> Pixels,
+    ) -> Pixels {
+        order
+            .iter()
+            .take_while(|&&other| other != column)
+            .fold(LINE_NUMBER_RIGHT_MARGIN, |inset, &other| {
+                inset + width(other)
+            })
+    }
+
+    #[test]
+    fn a_gutter_order_lists_every_column_once() {
+        use GutterColumn::*;
+        assert_eq!(GutterColumn::order([]), [FoldIcons, LineNumbers, Markers]);
+        assert_eq!(
+            GutterColumn::order([Markers]),
+            [Markers, FoldIcons, LineNumbers]
+        );
+        assert_eq!(
+            GutterColumn::order([LineNumbers, LineNumbers, Markers, LineNumbers]),
+            [LineNumbers, Markers, FoldIcons]
+        );
+        for order in GUTTER_ORDERS {
+            assert_eq!(GutterColumn::order(order), order);
+        }
+    }
+
     /// Projects a fold icon renderer whose icons record where they are laid out.
     fn record_fold_icons(
         editor: &Entity<EditorState>,
@@ -4589,9 +4665,14 @@ mod tests {
 
             // Every span the gutter paints, measured from the gutter's outer edge to
             // the span's near side, then the text's distance from the gutter.
-            let measure = |side: Side, folding: bool, window: &mut Window, cx: &mut App| {
+            let measure = |side: Side,
+                           order: [GutterColumn; 3],
+                           folding: bool,
+                           window: &mut Window,
+                           cx: &mut App| {
                 editor.update(cx, |state, cx| {
                     state.set_gutter_side(side, cx);
+                    state.set_gutter_order(order, cx);
                     state.set_folding(folding, window, cx);
                     state.set_selected_range(0..0, cx);
                 });
@@ -4611,8 +4692,9 @@ mod tests {
                 let at = |x: Pixels, width: Pixels| from_outer(input_bounds.left() + x, width);
 
                 let gutter = editor_gutter_bounds(input_bounds, layout.line_number_width, px(0.), paddings, side);
-                let (numbers_x, fold_x) = gutter_columns(&layout, folding);
-                let numbers_width = line_number_column_width(&layout, folding);
+                let (numbers_x, numbers_width) =
+                    gutter_column(&layout, folding, GutterColumn::LineNumbers);
+                let (fold_x, _) = gutter_column(&layout, folding, GutterColumn::FoldIcons);
                 assert!(layout.gutter_marker_width > px(0.));
                 let marker = *markers.borrow().first().expect("a gutter marker is laid out");
                 let mut spans = vec![
@@ -4640,14 +4722,18 @@ mod tests {
                 (spans, text_gap, layout.text_width)
             };
 
-            for folding in [true, false] {
-                let (left, left_gap, left_width) = measure(Side::Left, folding, window, cx);
-                let (right, right_gap, right_width) = measure(Side::Right, folding, window, cx);
+            for (order, folding) in GUTTER_ORDERS
+                .into_iter()
+                .flat_map(|order| [(order, true), (order, false)])
+            {
+                let (left, left_gap, left_width) = measure(Side::Left, order, folding, window, cx);
+                let (right, right_gap, right_width) =
+                    measure(Side::Right, order, folding, window, cx);
                 assert_eq!(left.len(), right.len());
                 for (ix, (left, right)) in left.iter().zip(&right).enumerate() {
                     assert!(
                         (*left - *right).abs() < px(0.01),
-                        "span {ix} with folding {folding}: {left:?} on the left, {right:?} on the right"
+                        "span {ix}, {order:?} with folding {folding}: {left:?} on the left, {right:?} on the right"
                     );
                 }
                 assert_eq!(left_gap, px(0.));
@@ -4655,6 +4741,166 @@ mod tests {
                 assert_eq!(left_width, right_width);
             }
         });
+    }
+
+    #[gpui::test]
+    fn the_gutter_order_counts_from_the_text(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "a\n  b\nc", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let markers = record_markers(&editor, cx);
+            let icons = record_fold_icons(&editor, cx);
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+                state.create_line_decorations_collection(Bands::new(true), cx);
+            });
+            for side in [Side::Left, Side::Right] {
+                for order in GUTTER_ORDERS {
+                    editor.update(cx, |state, cx| {
+                        state.set_gutter_side(side, cx);
+                        state.set_gutter_order(order, cx);
+                        state.set_selected_range(0..0, cx);
+                    });
+                    icons.borrow_mut().clear();
+                    markers.borrow_mut().clear();
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    let layout = state.last_layout.clone().unwrap();
+                    let input_bounds = state.input_bounds;
+                    // How far a span's near side is from the text.
+                    let from_text = |x: Pixels, width: Pixels| {
+                        if side.is_left() {
+                            input_bounds.left() + layout.text_origin_x - (x + width)
+                        } else {
+                            x - (input_bounds.left() + layout.text_origin_x + layout.text_width)
+                        }
+                    };
+                    let numbers_width = line_number_column_width(&layout, true);
+                    let digit = numbers_width / 3.;
+                    let number = from_text(
+                        input_bounds.left() + line_number_x(&layout, true, digit),
+                        digit,
+                    );
+                    let icon = *icons.borrow().first().expect("a fold icon is laid out");
+                    let icon = from_text(icon.left(), icon.size.width);
+                    let icon_inset = (FOLD_ICON_HITBOX_WIDTH - FOLD_ICON_WIDTH).half();
+
+                    let marker = *markers
+                        .borrow()
+                        .first()
+                        .expect("a gutter marker is laid out");
+                    let marker_width = marker.size.width;
+                    let marker = from_text(marker.left(), marker_width);
+                    let slot = layout.gutter_marker_width;
+                    assert!(slot > marker_width);
+
+                    let width = |column| match column {
+                        GutterColumn::FoldIcons => FOLD_ICON_HITBOX_WIDTH,
+                        GutterColumn::LineNumbers => numbers_width,
+                        GutterColumn::Markers => slot,
+                    };
+                    let number_from_text =
+                        inset_from_text(&order, GutterColumn::LineNumbers, width);
+                    let icon_from_text =
+                        inset_from_text(&order, GutterColumn::FoldIcons, width) + icon_inset;
+                    // The marker keeps its gap toward the line numbers.
+                    let numbers_inside =
+                        number_from_text < inset_from_text(&order, GutterColumn::Markers, width);
+                    let marker_from_text = inset_from_text(&order, GutterColumn::Markers, width)
+                        + if numbers_inside {
+                            slot - marker_width
+                        } else {
+                            px(0.)
+                        };
+                    // The marker is laid out on whole pixels.
+                    assert!(
+                        (marker - marker_from_text).abs() <= px(0.5),
+                        "{side:?} gutter, {order:?}: the marker is {marker:?} from the text"
+                    );
+                    assert!(
+                        (number - number_from_text).abs() < px(0.01),
+                        "{side:?} gutter, {order:?}: the line number is {number:?} from the text"
+                    );
+                    // The icon is laid out on whole pixels.
+                    assert!(
+                        (icon - icon_from_text).abs() <= px(0.5),
+                        "{side:?} gutter, {order:?}: the fold icon is {icon:?} from the text"
+                    );
+                }
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn a_click_lands_on_the_fold_icon_or_the_line_number_in_every_gutter(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "abc\n  b\nc", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|_, cx| {
+            record_markers(&editor, cx);
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Bands::new(true), cx);
+            });
+        });
+        for side in [Side::Left, Side::Right] {
+            for order in GUTTER_ORDERS {
+                let (on_number, on_icon) = cx.update(|window, cx| {
+                    editor.update(cx, |state, cx| {
+                        state.display_map.clear_folds();
+                        state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+                        state.set_gutter_side(side, cx);
+                        state.set_gutter_order(order, cx);
+                        state.set_selected_range(2..2, cx);
+                    });
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    let layout = state.last_layout.as_ref().unwrap();
+                    let input_bounds = state.input_bounds;
+                    let numbers_width = line_number_column_width(layout, true);
+                    assert!(layout.gutter_marker_width > px(0.));
+                    let width = |column| match column {
+                        GutterColumn::FoldIcons => FOLD_ICON_HITBOX_WIDTH,
+                        GutterColumn::LineNumbers => numbers_width,
+                        GutterColumn::Markers => layout.gutter_marker_width,
+                    };
+                    let numbers_inset = inset_from_text(&order, GutterColumn::LineNumbers, width);
+                    let fold_inset = inset_from_text(&order, GutterColumn::FoldIcons, width);
+                    // The center of a column `inset` from the text.
+                    let center = |inset: Pixels, width: Pixels| {
+                        let inset = inset + width.half();
+                        if side.is_left() {
+                            input_bounds.left() + layout.text_origin_x - inset
+                        } else {
+                            input_bounds.left() + layout.text_origin_x + layout.text_width + inset
+                        }
+                    };
+                    let y = input_bounds.top() + layout.line_height.half();
+                    (
+                        point(center(numbers_inset, numbers_width), y),
+                        point(center(fold_inset, FOLD_ICON_HITBOX_WIDTH), y),
+                    )
+                });
+
+                // The line number goes to the line, at the gutter's side of it.
+                cx.simulate_click(on_number, gpui::Modifiers::default());
+                editor.read_with(&cx, |state, _| {
+                    let at = if side.is_left() { 0 } else { 3 };
+                    assert_eq!(state.selected_range(), at..at, "{side:?} gutter, {order:?}");
+                    assert!(
+                        !state.display_map.is_folded_at(0),
+                        "{side:?} gutter, {order:?}"
+                    );
+                });
+
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                cx.simulate_click(on_icon, gpui::Modifiers::default());
+                editor.read_with(&cx, |state, _| {
+                    assert!(
+                        state.display_map.is_folded_at(0),
+                        "{side:?} gutter, {order:?}"
+                    );
+                });
+            }
+        }
     }
 
     #[gpui::test]
