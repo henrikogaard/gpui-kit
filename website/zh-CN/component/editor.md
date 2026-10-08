@@ -110,6 +110,14 @@ let editor = cx.new(|cx| {
 EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
 ```
 
+行号和折叠图标所在的 gutter 默认位于左侧。使用 `gutter_side` 可将其放到右侧，并镜像排列，折叠图标紧邻文本。再把滚动条放到左侧，就是并排 diff 中左侧窗格的布局：
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
 ## 快捷键与矩形列选
 
 以下默认快捷键在编辑器聚焦时生效。macOS 的 Option 对应 Alt 修饰键；Linux 的这些操作不使用 Super/Win。
@@ -313,8 +321,8 @@ added.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
 在被询问时从 `cx` 读取颜色，使其跟随主题变化。与其他装饰集合一样，各集合相互独立；
 后创建的集合绘制在先创建的集合之上。
 
-背景从行号槽一直延伸到右边缘，覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
-选区和文字下方。标记绘制在行号左侧的独立槽位中，因此只在显示行号时出现。只要有集合设置了
+背景横跨整行（包括行号槽），覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
+选区和文字下方。标记绘制在行号与行号槽外缘之间的独立槽位中，因此只在显示行号时出现。只要有集合设置了
 provider，行号槽就会保留该槽位，标记行滚入或滚出视图时宽度不变。
 样式化编辑器的标记尺寸为实际字号的 90%，间距为字号的 30%。图标、预留槽位和垂直居中使用同一尺寸，
 因此标记既跟随界面缩放，也跟随编辑器单独设置的 `.text_size(...)` 变化。`DiffAdded`、`DiffRemoved`、

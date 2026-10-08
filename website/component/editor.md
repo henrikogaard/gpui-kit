@@ -128,6 +128,17 @@ space for itself. `set_scrollbar_placement` replaces the placement at runtime.
 EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
 ```
 
+The gutter with the line numbers and fold icons sits on the left by default.
+Use `gutter_side` to put it on the right, mirrored, with the fold icons next to
+the text. Together with a scrollbar on the left, this lays out the left pane of
+a side-by-side diff:
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
 ## Keyboard shortcuts and column selection
 
 These defaults apply while the editor is focused. On macOS, Option is the Alt
@@ -364,9 +375,9 @@ data by row, and read colors from `cx` when asked so they follow theme changes.
 Collections are independent, like the other decoration collections; later ones paint
 over earlier ones.
 
-A background spans the row from the gutter to the right edge, across all of its
-soft-wrapped lines, under the active line, indent guides, selection and text. A marker
-is painted in a slot of its own at the left of the line numbers, so it is shown only
+A background spans the whole row, gutter included, across all of its soft-wrapped
+lines, under the active line, indent guides, selection and text. A marker is painted
+in a slot of its own on the outer side of the line numbers, so it is shown only
 while line numbers are. The gutter reserves the slot while any collection has a
 provider, and keeps it as marked rows scroll in and out of view. The styled editor
 sizes the marker at 90% of its effective font size and the gap at 30%. The icon,

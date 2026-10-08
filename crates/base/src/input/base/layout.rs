@@ -2,6 +2,8 @@ use std::{ops::Range, rc::Rc};
 
 use gpui::{Bounds, Half, Pixels, ShapedLine, TextAlign, px};
 
+use crate::Side;
+
 use super::{WrappingIndent, display_map::LineLayout};
 
 #[derive(Clone, Default)]
@@ -22,11 +24,17 @@ pub(super) struct LastLayout {
     pub(super) wrap_width: Option<Pixels>,
     pub(super) wrapping_indent: WrappingIndent,
     pub(super) line_number_width: Pixels,
-    /// Width reserved at the left of the line numbers for gutter markers, zero
-    /// when none can be painted. Part of `line_number_width`.
+    /// Width reserved between the line numbers and the outer edge of the gutter
+    /// for gutter markers, zero when none can be painted. Part of
+    /// `line_number_width`.
     pub(super) gutter_marker_width: Pixels,
     /// The buffer row that inline completion ghost lines follow, and their height.
     pub(super) ghost_lines: Option<(usize, Pixels)>,
+    pub(super) gutter_side: Side,
+    /// The x of the text, relative to the input bounds.
+    pub(super) text_origin_x: Pixels,
+    /// The x of the gutter, relative to the input bounds.
+    pub(super) gutter_origin_x: Pixels,
     /// Width of one space in the editor font.
     ///
     /// Past the end of a line there are no glyphs to hit-test against, so this is the

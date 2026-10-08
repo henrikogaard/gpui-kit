@@ -207,10 +207,10 @@ impl InputBaseState<EditorMode> {
     /// range decorations, rows are not tracked across edits: the provider answers
     /// for the text as it is when asked.
     ///
-    /// A background spans the row from the gutter to the right edge, across its
-    /// soft wraps, under the active line, indent guides, selections and text. A
-    /// marker is painted in a slot at the left of the line numbers, only while
-    /// they are shown; the gutter reserves the slot while any collection has a
+    /// A background spans the whole row, gutter included, across its soft wraps,
+    /// under the active line, indent guides, selections and text. A marker is
+    /// painted in a slot between the line numbers and the outer edge of the
+    /// gutter, only while they are shown; the gutter reserves the slot while any collection has a
     /// provider and a marker renderer is set. Later collections paint over earlier
     /// ones. Neither affects hit testing or focus. Collections live until
     /// explicitly disposed or the editor is dropped.
