@@ -102,28 +102,46 @@ fn attr_value(attrs: &RefCell<Vec<html5ever::Attribute>>, name: LocalName) -> Op
     })
 }
 
+/// Default `<mark>` background when the tag has no usable color.
+pub(super) fn default_mark_color() -> Hsla {
+    gpui::rgb(0xfef08a).into()
+}
+
 /// Get the highlight background color for a `<mark>` element.
 ///
 /// Reads the `color` attribute first, then the `background-color` declaration
 /// from the `style` attribute. Base accepts CSS hex plus common named colors.
 fn mark_color(attrs: &RefCell<Vec<html5ever::Attribute>>) -> Option<Hsla> {
-    let color_attr = attrs.borrow().iter().find_map(|attr| {
-        if &*attr.name.local == "color" {
-            Some(attr.value.to_string())
-        } else {
-            None
-        }
-    });
+    mark_color_from_values(
+        attr_value(attrs, local_name!("color")).as_deref(),
+        attr_value(attrs, local_name!("style")).as_deref(),
+    )
+}
 
-    if let Some(value) = color_attr
+/// Resolve a `<mark>` color from raw `color` / `style` attribute values.
+///
+/// Same rules as the block HTML path: `color` wins, then
+/// `style="background-color: …"`.
+pub(super) fn mark_color_from_values(color: Option<&str>, style: Option<&str>) -> Option<Hsla> {
+    if let Some(value) = color
         && let Some(color) = parse_mark_color(value.trim())
     {
         return Some(color);
     }
 
-    style_attrs(attrs)
-        .get("background-color")
-        .and_then(|v| parse_mark_color(v.trim()))
+    style.and_then(style_background_color)
+}
+
+fn style_background_color(css_text: &str) -> Option<Hsla> {
+    for decl in css_text.split(';') {
+        let mut parts = decl.splitn(2, ':');
+        if let (Some(key), Some(value)) = (parts.next(), parts.next())
+            && key.trim().eq_ignore_ascii_case("background-color")
+        {
+            return parse_mark_color(value.trim());
+        }
+    }
+    None
 }
 
 fn parse_mark_color(value: &str) -> Option<Hsla> {
@@ -361,7 +379,7 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
                 merge_children_with_mark(node, paragraph, Some(TextMark::default().code()));
             }
             local_name!("mark") => {
-                let color = mark_color(&attrs).unwrap_or_else(|| gpui::rgb(0xfef08a).into());
+                let color = mark_color(&attrs).unwrap_or_else(default_mark_color);
                 merge_children_with_mark(
                     node,
                     paragraph,
