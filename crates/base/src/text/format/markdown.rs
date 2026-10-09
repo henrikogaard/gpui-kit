@@ -2367,7 +2367,7 @@ mod tests {
     fn inline_html_mark_applies_highlight_colors() {
         let source = concat!(
             r#"Plain <mark>highlighted</mark> text and "#,
-            r#"<mark color="#ff000059">red</mark> and "#,
+            r##"<mark color="#ff000059">red</mark> and "##,
             r#"<mark style="background-color: #336699">hex</mark> "#,
             r#"plus <strong>bold</strong> <em>italic</em> <u>under</u> <del>strike</del>."#
         );
