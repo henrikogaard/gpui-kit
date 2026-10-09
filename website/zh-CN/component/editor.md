@@ -104,11 +104,29 @@ let editor = cx.new(|cx| {
 });
 ```
 
-滚动条默认位于右侧和底部。使用 `scrollbar_placement` 可调整其位置；放在左侧的纵向滚动条位于编辑器左边缘，覆盖在行号之上。与覆盖最后一行的底部滚动条一样，顶部滚动条覆盖在第一行之上，不为自身预留空间。运行时可用 `set_scrollbar_placement` 替换位置。
+滚动条默认位于右侧和底部。使用 `scrollbar_placement` 可调整其位置；放在左侧的纵向滚动条位于编辑器左边缘，覆盖在行号之上；若 gutter 位于右侧，文本会与滚动条保持间距。与覆盖最后一行的底部滚动条一样，顶部滚动条覆盖在第一行之上，不为自身预留空间。运行时可用 `set_scrollbar_placement` 替换位置。
+
+在右侧 gutter、左侧滚动条的镜像窗格中，横向轨道会避开 gutter，纵向轨道仍位于窗格外侧边缘。
 
 ```rust
 EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
 ```
+
+行号和折叠图标所在的 gutter 默认位于左侧。在并排 diff 中，两侧的 gutter 可以朝向中间，使对应行的行号隔着分隔线相邻。左侧窗格用 `gutter_side` 将 gutter 放到右侧（镜像排列，折叠图标紧邻文本），并把滚动条放到外侧边缘：
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
+无论 gutter 位于哪一侧，折叠图标默认紧邻文本，向外依次是行号和 gutter 标记。使用 `gutter_order` 可按从文本向外的顺序列出各列，未列出的列依次排在其后。在 diff 中，这样可以把变更标记放在文本与行号之间：
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Markers])
+```
+
+Editor Diff 示例展示了这两种布局，两个窗格同步滚动。
 
 ## 快捷键与矩形列选
 
@@ -313,8 +331,9 @@ added.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
 在被询问时从 `cx` 读取颜色，使其跟随主题变化。与其他装饰集合一样，各集合相互独立；
 后创建的集合绘制在先创建的集合之上。
 
-背景从行号槽一直延伸到右边缘，覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
-选区和文字下方。标记绘制在行号左侧的独立槽位中，因此只在显示行号时出现。只要有集合设置了
+背景横跨整行（包括行号槽），覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
+选区和文字下方。标记绘制在独立槽位中，只在显示行号时出现。默认顺序下，该槽位位于行号与行号槽外缘之间；
+使用 `gutter_order` 可将其移到更靠近文本的位置，与 IntelliJ IDEA 放置标记的方式一致。只要有集合设置了
 provider，行号槽就会保留该槽位，标记行滚入或滚出视图时宽度不变。
 样式化编辑器的标记尺寸为实际字号的 90%，间距为字号的 30%。图标、预留槽位和垂直居中使用同一尺寸，
 因此标记既跟随界面缩放，也跟随编辑器单独设置的 `.text_size(...)` 变化。`DiffAdded`、`DiffRemoved`、
