@@ -133,15 +133,16 @@ pub(super) fn mark_color_from_values(color: Option<&str>, style: Option<&str>) -
 }
 
 fn style_background_color(css_text: &str) -> Option<Hsla> {
+    let mut last = None;
     for decl in css_text.split(';') {
         let mut parts = decl.splitn(2, ':');
         if let (Some(key), Some(value)) = (parts.next(), parts.next())
             && key.trim().eq_ignore_ascii_case("background-color")
         {
-            return parse_mark_color(value.trim());
+            last = Some(value.trim());
         }
     }
-    None
+    last.and_then(parse_mark_color)
 }
 
 fn parse_mark_color(value: &str) -> Option<Hsla> {
@@ -741,6 +742,33 @@ mod tests {
         let html = r#"<p><mark color="blue">blue</mark> and <mark style="background-color: #336699">hex</mark></p>"#;
         let node = super::parse(html, &mut cx).unwrap();
         assert_eq!(node.to_markdown(), "==blue== and ==hex==");
+    }
+
+    #[test]
+    fn test_mark_repeated_background_color_uses_last_declaration() {
+        assert_eq!(
+            super::mark_color_from_values(
+                None,
+                Some("background-color:yellow;background-color:blue")
+            ),
+            Some(gpui::rgb(0x3b82f6).into())
+        );
+        assert_eq!(
+            super::mark_color_from_values(
+                None,
+                Some("background-color:notacolor;background-color:blue")
+            ),
+            Some(gpui::rgb(0x3b82f6).into())
+        );
+        // Last declaration wins as a string, then it is parsed — the same as
+        // the old HashMap path. An invalid last value does not fall back.
+        assert_eq!(
+            super::mark_color_from_values(
+                None,
+                Some("background-color:blue;background-color:notacolor")
+            ),
+            None
+        );
     }
 
     #[test]
