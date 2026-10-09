@@ -1,6 +1,7 @@
 use crate::input::{InputExtras as _, InputModeKind};
 use gpui::Corners;
 use gpui::Half;
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Bounds, Edges, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId,
@@ -139,6 +140,7 @@ pub(super) struct EditorScrollbarSnapshot {
     cursor_scroll_offset: Point<Pixels>,
     soft_wrap: bool,
     placement: ScrollbarPlacement,
+    horizontal_bounds: Option<Bounds<Pixels>>,
 }
 
 impl EditorScrollbarSnapshot {
@@ -149,14 +151,33 @@ impl EditorScrollbarSnapshot {
         cursor_scroll_offset: Point<Pixels>,
         state: &InputBaseState<M>,
     ) -> Self {
+        let layout = EditorScrollbarLayout::new(
+            input_bounds,
+            last_layout.text_origin_x,
+            scroll_size,
+            state.editor_paddings,
+            state.scrollbar_placement,
+        );
+        let horizontal_bounds = (state.gutter_side.is_right()
+            && state.scrollbar_placement.is_left()
+            && last_layout.line_number_width > px(0.))
+        .then(|| {
+            // Mirror the left gutter's track inset, including its outer
+            // padding. The full viewport still anchors the vertical bar.
+            let inset = (state.editor_paddings.right * 2. + last_layout.line_number_width
+                - LINE_NUMBER_RIGHT_MARGIN)
+                .max(px(0.));
+            Bounds::new(
+                layout.bounds.origin,
+                size(
+                    (layout.bounds.size.width - inset).max(px(0.)),
+                    layout.bounds.size.height,
+                ),
+            )
+        });
         Self {
-            layout: EditorScrollbarLayout::new(
-                input_bounds,
-                last_layout.text_origin_x,
-                scroll_size,
-                state.editor_paddings,
-                state.scrollbar_placement,
-            ),
+            layout,
+            horizontal_bounds,
             cursor_scroll_offset,
             soft_wrap: state.soft_wrap,
             placement: state.scrollbar_placement,
@@ -270,6 +291,9 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
         }
         .placement(snapshot.placement)
         .viewport_bounds(snapshot.layout.bounds)
+        .when_some(snapshot.horizontal_bounds, |this, bounds| {
+            this.horizontal_viewport_bounds(bounds)
+        })
         .scroll_size(snapshot.layout.scroll_size)
         .into_any_element();
 
@@ -3858,7 +3882,7 @@ mod tests {
     use crate::{ScrollbarMode, ScrollbarStyles, ScrollbarTheme, Theme};
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, Render, TestAppContext,
-        VisualTestContext, div, prelude::FluentBuilder as _,
+        VisualTestContext, div,
     };
 
     #[test]
@@ -4901,6 +4925,37 @@ mod tests {
                 });
             }
         }
+    }
+
+    #[gpui::test]
+    fn horizontal_scrollbar_does_not_claim_clicks_in_the_right_gutter(cx: &mut TestAppContext) {
+        let text = format!("{}\n", "long line ".repeat(30)).repeat(40);
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let click = cx.update(|window, cx| {
+            Theme::global_mut(cx).scrollbar =
+                ScrollbarTheme::new().with_mode(ScrollbarMode::Always);
+            editor.update(cx, |state, cx| {
+                state.set_gutter_side(Side::Right, cx);
+                state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let (numbers_x, numbers_width) = gutter_column(layout, true, GutterColumn::LineNumbers);
+            point(
+                state.input_bounds.left() + numbers_x + numbers_width.half(),
+                state.input_bounds.bottom() - px(2.),
+            )
+        });
+        cx.simulate_click(click, gpui::Modifiers::default());
+        editor.read_with(&cx, |state, _| {
+            assert_ne!(
+                state.selected_range(),
+                0..0,
+                "the click must reach the editor"
+            );
+        });
     }
 
     #[gpui::test]

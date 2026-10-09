@@ -125,6 +125,8 @@ gutter is on the right. Like the bottom scrollbar over the last line, a top
 scrollbar overlays the first line rather than reserving space for itself.
 `set_scrollbar_placement` replaces the placement at runtime.
 
+In a mirrored pane with a right gutter and left scrollbar, the horizontal track stops before the gutter while the vertical track stays at the outer edge.
+
 ```rust
 EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
 ```
