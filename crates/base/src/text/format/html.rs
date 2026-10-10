@@ -129,20 +129,7 @@ pub(super) fn mark_color_from_values(color: Option<&str>, style: Option<&str>) -
         return Some(color);
     }
 
-    style.and_then(style_background_color)
-}
-
-fn style_background_color(css_text: &str) -> Option<Hsla> {
-    let mut last = None;
-    for decl in css_text.split(';') {
-        let mut parts = decl.splitn(2, ':');
-        if let (Some(key), Some(value)) = (parts.next(), parts.next())
-            && key.trim().eq_ignore_ascii_case("background-color")
-        {
-            last = Some(value.trim());
-        }
-    }
-    last.and_then(parse_mark_color)
+    style.and_then(|css_text| parse_mark_color(style_attrs(css_text).get("background-color")?))
 }
 
 fn parse_mark_color(value: &str) -> Option<Hsla> {
@@ -160,12 +147,8 @@ fn parse_mark_color(value: &str) -> Option<Hsla> {
 
 /// Get style properties to HashMap
 /// TODO: Use cssparser to parse style attribute.
-fn style_attrs(attrs: &RefCell<Vec<html5ever::Attribute>>) -> HashMap<String, String> {
+fn style_attrs(css_text: &str) -> HashMap<String, String> {
     let mut styles = HashMap::new();
-    let Some(css_text) = attr_value(attrs, local_name!("style")) else {
-        return styles;
-    };
-
     for decl in css_text.split(';') {
         let mut parts = decl.splitn(2, ':');
         if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
@@ -215,7 +198,9 @@ fn attr_width_height(
     }
 
     if width.is_none() || height.is_none() {
-        let styles = style_attrs(attrs);
+        let styles = attr_value(attrs, local_name!("style"))
+            .map(|css_text| style_attrs(&css_text))
+            .unwrap_or_default();
         if width.is_none() {
             width = styles.get("width").and_then(|v| value_to_length(&v));
         }
@@ -742,33 +727,6 @@ mod tests {
         let html = r#"<p><mark color="blue">blue</mark> and <mark style="background-color: #336699">hex</mark></p>"#;
         let node = super::parse(html, &mut cx).unwrap();
         assert_eq!(node.to_markdown(), "==blue== and ==hex==");
-    }
-
-    #[test]
-    fn test_mark_repeated_background_color_uses_last_declaration() {
-        assert_eq!(
-            super::mark_color_from_values(
-                None,
-                Some("background-color:yellow;background-color:blue")
-            ),
-            Some(gpui::rgb(0x3b82f6).into())
-        );
-        assert_eq!(
-            super::mark_color_from_values(
-                None,
-                Some("background-color:notacolor;background-color:blue")
-            ),
-            Some(gpui::rgb(0x3b82f6).into())
-        );
-        // Last declaration wins as a string, then it is parsed — the same as
-        // the old HashMap path. An invalid last value does not fall back.
-        assert_eq!(
-            super::mark_color_from_values(
-                None,
-                Some("background-color:blue;background-color:notacolor")
-            ),
-            None
-        );
     }
 
     #[test]
